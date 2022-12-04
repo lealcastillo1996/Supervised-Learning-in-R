@@ -1,0 +1,327 @@
+---
+title: "assigment"
+output: html_document
+date: "2022-10-11"
+---
+
+
+TEAM 11 GROUP 3 
+Robert Locher (5747465), Jose Enrique Leal Castillo (9066381), Niek Lieon (6520448)
+```{r}
+
+library(ISLR)
+library(tidyverse)
+
+library(tidyverse)
+df_train <- read_rds("data/train.rds")
+df_test  <- read_rds("data/test.rds")
+
+
+
+```
+
+
+We will first approach this prediction of scores with a linear model to see if the model needs more complexity
+#Preprocessing
+
+First we define a processing function to encode all categorical values into numbers
+
+```{r}
+library(caret)
+df <- df_train
+# Defining preprocessing fuction
+preprocess <- function(df)
+  {
+  
+   try({
+    df$schoolsup<-ifelse(df$schoolsup=="yes",1,0)
+  }, silent = TRUE)
+  
+  
+  
+   try({
+     df$famsup<-ifelse(df$famsup=="yes",1,0)
+  }, silent = TRUE)
+
+ 
+  
+  
+   try({
+    df$paid<-ifelse(df$paid=="yes",1,0)
+  }, silent = TRUE)
+  
+  
+  try({
+    df$activities<-ifelse(df$activities=="yes",1,0)
+  }, silent = TRUE)
+  
+  try({
+      df$nursery<-ifelse(df$nursery=="yes",1,0)
+  }, silent = TRUE)
+  
+
+  
+  
+   try({
+       df$higher<-ifelse(df$higher=="yes",1,0)
+  }, silent = TRUE)
+  
+     try({
+        df$internet<-ifelse(df$internet=="yes",1,0)
+  }, silent = TRUE)
+
+  try({
+       df$romantic<-ifelse(df$romantic=="yes",1,0)
+  }, silent = TRUE)
+ 
+  
+  try({
+       df$school<-ifelse(df$school=="GP",1,0)
+  }, silent = TRUE)
+  
+
+  
+   try({
+        df$sex<-ifelse(df$sex=="M",1,0)
+  }, silent = TRUE)
+  
+   try({
+         df$address<-ifelse(df$address=="U",1,0)
+  }, silent = TRUE)
+  
+   try({
+         df$famsize<-ifelse(df$famsize=="GT3",1,0)
+  }, silent = TRUE)
+  
+  
+    try({
+           df$Pstatus<-ifelse(df$Pstatus=="A",1,0)
+  }, silent = TRUE)
+
+  library(caret)
+#define one-hot encoding function
+dummy <- dummyVars(" ~ .", data=df)
+#perform one-hot encoding on data frame
+final_df <- data.frame(predict(dummy, newdata=df))
+
+#view final data frame
+final_df
+
+  
+  return (final_df)
+}
+
+#Preprocessing df
+df_pro = preprocess(df)
+
+
+
+
+
+
+
+```
+
+
+
+#Feature selection
+
+After preparing our data, we perform a method to obtain optimum number of features
+
+
+
+```{r}
+set.seed(7)
+control <- rfeControl(functions = lmFuncs, method = "repeatedcv", repeats = 10)
+results <- rfe(df_pro[,1:43], df_pro[,44], sizes=c(1:43), rfeControl=control)
+
+```
+
+
+
+```{r}
+plot(results, type=c("g", "o"))
+```
+
+
+So the optimum variable size is around 13
+
+##LASSO REGRESSION
+
+is used to find variables that are important for a linear model, we select an arbitrary threshold of .05 coefficients values.
+
+```{r}
+
+library(glmnet)
+df_x = select(df_pro, -score)
+
+
+
+
+set.seed(7)
+mod <- cv.glmnet(as.matrix(df_x), df_pro$score, alpha=1,nfolds = 5)
+a = as.matrix(coef(mod, mod$lambda.min))
+
+
+a = as.data.frame(a)
+
+ft = filter(a,abs(s1) >0.05)
+vars = as.vector(rownames(ft))
+#avoiding the first index
+vars = vars[-1]
+
+vars
+
+ft = ft * ft
+ft = arrange(ft, desc(s1))
+
+```
+
+#Vector of selected variables
+
+```{r}
+selected = vars
+
+selected
+```
+
+we now define the X with only features selected
+
+```{r}
+df_sel = df_x[selected]
+
+
+
+train = cbind(df_sel ,df_pro$score )
+
+#renaming column
+names(train)[names(train) == "df_pro$score"] <- "score"
+
+```
+
+#Residual plot
+a residual plot is done to validate if the linear model is correct
+
+```{r}
+#Residual plot data
+y = train$score
+lm_ses <-  lm(formula = score ~ sex  + Mjob.health  + Mjob.services  + Fjob.teacher + Fjob.other + reason.course + ( failures )+  schoolsup + romantic + studytime+traveltime+famsup+goout+Medu+famsize
+ , data = train)
+predictions = predict(lm_ses, newdata = train )
+failures = select(train,failures)
+y = as.data.frame(y)
+predictions = as.data.frame(predictions)
+
+
+residuals = cbind(y,predictions,failures)
+
+residuals = residuals %>%
+  mutate(residual = y - predictions)%>%
+mutate(row = as.double(rownames(residuals)))
+
+ggplot(data = residuals, aes(x = predictions,y = residual))+
+ geom_point()
+  
+
+median(residuals$residual)
+```
+The residual plot indicates linear approach is the best because no patterns are observed in the data + the mean and median of residuals is close to 0
+
+
+
+
+
+#Method selection with crossvalidation train control 
+
+We evaluate crossvalidation performance of the model with train control RMSE
+```{r}
+
+
+set.seed(7)
+train.control <- trainControl(method = 'cv', number = 10)
+
+model <- train( score ~ sex  + Mjob.health  + Mjob.services  + Fjob.teacher + Fjob.other + reason.course + failures + schoolsup + romantic + studytime+traveltime+famsup+goout+Medu+famsize,
+               data = train,
+               method = "lm",
+               trControl = train.control)
+
+print(model)
+
+```
+
+
+
+
+# selection based on class crossvalidation formula
+
+additionally, we validate the model with the class contructed crossvalidation function
+```{r}
+cctrl1 <- trainControl(method = "cv", number = 10, returnResamp = "all")
+# Just for reference, here is the mse() function once more
+mse <- function(y_true, y_pred) mean((y_true - y_pred)^2)
+
+cv_lm <- function(formula, dataset, k) {
+  # We can do some error checking before starting the function
+        # formula must be a formula
+  stopifnot(is.data.frame(dataset))    # dataset must be data frame
+  stopifnot(is.integer(as.integer(k))) # k must be convertible to int
+  
+  # first, add a selection column to the dataset as before
+  n_samples  <- nrow(dataset)
+  select_vec <- rep(1:k, length.out = n_samples)
+  data_split <- dataset %>% mutate(folds = sample(select_vec))
+  
+  # initialise an output vector of k mse values, which we 
+  # will fill by using a _for loop_ going over each fold
+  mses <- rep(0, k)
+  
+  # start the for loop
+  for (i in 1:k) {
+    # split the data in train and validation set
+    data_train <- data_split %>% filter(folds != i)
+    data_valid <- data_split %>% filter(folds == i)
+    
+    # calculate the model on this data
+    model_i <-  lm(formula =  score ~ sex  + Mjob.health  + Mjob.services  + Fjob.teacher + Fjob.other + reason.course + failures + schoolsup + romantic + studytime+traveltime+famsup+goout+Medu+famsize
+ , data = train )
+    
+    # Extract the y column name from the formula
+    y_column_name <- as.character(formula)[2]
+    
+    # calculate the mean square error and assign it to mses
+    mses[i] <- mse(y_true = data_valid[[y_column_name]],
+                   y_pred = predict(model_i, newdata = data_valid))
+  }
+  
+  # now we have a vector of k mse values. All we need is to
+  # return the mean mse!
+  return(mean(mses))
+}
+
+
+set.seed(7)
+cv_lm( score ~ sex  + Mjob.health  + Mjob.services  + Fjob.teacher + Fjob.other + reason.course + ( failures )  +  schoolsup + romantic + studytime+traveltime+famsup+goout+Medu+famsize, train, 10)
+```
+
+
+#FINAL PREDICTIONS
+Now that we validated our model, we will make the prediction for the test set with the linear model
+
+```{r}
+lm_ses <-  lm(formula = score ~ sex  + Mjob.health  + Mjob.services  + Fjob.teacher + Fjob.other + reason.course + ( failures )+  schoolsup + romantic + studytime+traveltime+famsup+goout+Medu+famsize
+ , data = train)
+df_test  <- read_rds("data/test.rds")
+df_final_test = preprocess(df_test )
+df_final_test = df_final_test[selected]
+pred_vec = predict(   lm_ses, newdata = df_final_test   )
+pred_vec
+
+```
+
+Saving to rds
+```{r}
+write_rds(pred_vec, path = "pred_11_group3.rds")
+```
+
+
+
